@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.openmrs.learning</groupId>
+    <artifactId>test-advanced-config</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>Advanced Configuration Test</name>
+    <description>Test advanced plugin configuration with all parameter types</description>
+
+    <properties>
+        <maven.compiler.source>8</maven.compiler.source>
+        <maven.compiler.target>8</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.openmrs.learning</groupId>
+                <artifactId>maven-plugin-parameter-test</artifactId>
+                <version>1.0.0-SNAPSHOT</version>
+                <executions>
+                    <execution>
+                        <id>test-all-parameters</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>hello</goal>
+                        </goals>
+                        <configuration>
+                            <greeting>OpenMRS Advanced Config</greeting>
+                            <modulePackage>org.openmrs.module.test</modulePackage>
+                            <verbose>true</verbose>
+                            <outputDirectory>${project.build.directory}/custom-output</outputDirectory>
+                            <scanPackages>
+                                <scanPackage>org.openmrs.module.test.web.resources</scanPackage>
+                                <scanPackage>org.openmrs.module.test.api</scanPackage>
+                                <scanPackage>org.openmrs.module.test.model</scanPackage>
+                            </scanPackages>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

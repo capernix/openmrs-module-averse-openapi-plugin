@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.openmrs.module</groupId>
+    <artifactId>queue-omod</artifactId>
+    <version>2.7.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>Queue Module OMOD Simulation</name>
+    <description>Simulate Queue module OMOD for OpenAPI generation testing</description>
+
+    <properties>
+        <maven.compiler.source>8</maven.compiler.source>
+        <maven.compiler.target>8</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <build>
+        <plugins>
+            <!-- This is how the OpenAPI plugin would be configured in a real module -->
+            <plugin>
+                <groupId>org.openmrs.learning</groupId>
+                <artifactId>maven-plugin-parameter-test</artifactId>
+                <version>1.0.0-SNAPSHOT</version>
+                <executions>
+                    <execution>
+                        <id>generate-openapi-spec</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>hello</goal>
+                        </goals>
+                        <configuration>
+                            <greeting>Queue Module OpenAPI</greeting>
+                            <verbose>true</verbose>
+                            <outputDirectory>${project.build.directory}/openapi</outputDirectory>
+                            <scanPackages>
+                                <scanPackage>org.openmrs.module.queue.web.resources</scanPackage>
+                                <scanPackage>org.openmrs.module.queue.api</scanPackage>
+                            </scanPackages>
+                            <!-- modulePackage will be auto-derived from queue-omod -> org.openmrs.module.queue -->
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
