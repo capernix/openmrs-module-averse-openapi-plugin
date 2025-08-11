@@ -1,5 +1,6 @@
 package org.openmrs.learning;
 
+import org.apache.maven.artifact.Artifact;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
@@ -8,10 +9,14 @@ import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.project.MavenProject;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStreamReader;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.jar.JarEntry;
@@ -58,6 +63,18 @@ public class ModuleDiscoveryMojo extends AbstractMojo {
     @Parameter(property = "showAllPackages", defaultValue = "false")
     private boolean showAllPackages;
     
+    /**
+     * Generate OpenAPI specification using forked JVM approach
+     */
+    @Parameter(property = "generateOpenApi", defaultValue = "false")
+    private boolean generateOpenApi;
+    
+    /**
+     * Output file for OpenAPI specification
+     */
+    @Parameter(property = "openApiOutputFile", defaultValue = "${project.build.directory}/openapi-spec.json")
+    private String openApiOutputFile;
+    
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
         getLog().info("=== OpenMRS Module Discovery ===");
@@ -70,6 +87,11 @@ public class ModuleDiscoveryMojo extends AbstractMojo {
         
         // 3. Show build context
         showBuildContext();
+        
+        // 4. Generate OpenAPI spec if requested
+        if (generateOpenApi) {
+            generateOpenApiSpec();
+        }
         
         getLog().info("=== Module Discovery Complete ===");
     }
@@ -271,6 +293,151 @@ public class ModuleDiscoveryMojo extends AbstractMojo {
                 modulePackage + ".api",
                 modulePackage + ".web"
             );
+        }
+    }
+    
+    /**
+     * Generate OpenAPI specification using forked JVM approach
+     */
+    private void generateOpenApiSpec() throws MojoExecutionException {
+        getLog().info("=== Generating OpenAPI Specification ===");
+        
+        try {
+            // Find the plugin JAR containing SimpleOpenApiRunner
+            String pluginJarPath = findPluginJar();
+            getLog().info("Using plugin JAR: " + pluginJarPath);
+            
+            // Build classpath for the target module
+            List<String> classpath = buildClasspath();
+            
+            // Execute SimpleOpenApiRunner in forked JVM
+            executeOpenApiRunner(pluginJarPath, classpath);
+            
+            getLog().info("OpenAPI specification generated successfully");
+            
+        } catch (Exception e) {
+            throw new MojoExecutionException("Failed to generate OpenAPI specification", e);
+        }
+    }
+    
+    /**
+     * Find the plugin JAR containing SimpleOpenApiRunner
+     */
+    private String findPluginJar() throws MojoExecutionException {
+        // Look for the plugin in Maven's plugin artifacts
+        @SuppressWarnings("unchecked")
+        Map<String, Artifact> pluginArtifacts = (Map<String, Artifact>) getPluginContext().get("plugin.artifactMap");
+        
+        getLog().info("DEBUG: Plugin context keys: " + getPluginContext().keySet());
+        
+        if (pluginArtifacts != null) {
+            getLog().info("DEBUG: Found plugin.artifactMap with " + pluginArtifacts.size() + " artifacts");
+            for (Map.Entry<String, Artifact> entry : pluginArtifacts.entrySet()) {
+                getLog().info("DEBUG: Plugin artifact: " + entry.getKey() + " -> " + entry.getValue());
+                if (entry.getValue() != null && entry.getValue().getFile() != null) {
+                    getLog().info("DEBUG: Artifact file: " + entry.getValue().getFile().getAbsolutePath());
+                }
+            }
+            
+            for (Artifact artifact : pluginArtifacts.values()) {
+                if (artifact.getGroupId().equals("org.openmrs.learning") && 
+                    artifact.getArtifactId().equals("maven-plugin-parameter-test")) {
+                    String jarPath = artifact.getFile().getAbsolutePath();
+                    getLog().info("Found plugin JAR via artifactMap: " + jarPath);
+                    return jarPath;
+                }
+            }
+        } else {
+            getLog().warn("DEBUG: plugin.artifactMap is null");
+        }
+        
+        // Fallback: try to locate from Maven local repository
+        String userHome = System.getProperty("user.home");
+        String jarPath = userHome + "/.m2/repository/org/openmrs/learning/maven-plugin-parameter-test/1.0.0-SNAPSHOT/maven-plugin-parameter-test-1.0.0-SNAPSHOT.jar";
+        File jarFile = new File(jarPath);
+        
+        if (jarFile.exists()) {
+            getLog().info("Found plugin JAR via fallback: " + jarPath);
+            return jarPath;
+        }
+        
+        throw new MojoExecutionException("Could not locate plugin JAR containing SimpleOpenApiRunner");
+    }
+    
+    /**
+     * Build classpath for the target module
+     */
+    private List<String> buildClasspath() {
+        List<String> classpath = new ArrayList<>();
+        
+        // Add compiled classes
+        classpath.add(project.getBuild().getOutputDirectory());
+        
+        // Add dependencies
+        @SuppressWarnings("unchecked")
+        Set<Artifact> artifacts = project.getArtifacts();
+        for (Artifact artifact : artifacts) {
+            if (artifact.getFile() != null && artifact.getFile().exists()) {
+                classpath.add(artifact.getFile().getAbsolutePath());
+            }
+        }
+        
+        getLog().info("Built classpath with " + classpath.size() + " entries");
+        return classpath;
+    }
+    
+    /**
+     * Execute SimpleOpenApiRunner in forked JVM
+     */
+    private void executeOpenApiRunner(String pluginJarPath, List<String> classpath) throws Exception {
+        List<String> command = new ArrayList<>();
+        
+        // Java executable
+        String javaHome = System.getProperty("java.home");
+        String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
+        if (System.getProperty("os.name").toLowerCase().contains("windows")) {
+            javaExecutable += ".exe";
+        }
+        command.add(javaExecutable);
+        
+        // Classpath: plugin JAR first, then module classpath
+        StringBuilder cp = new StringBuilder();
+        cp.append(pluginJarPath);
+        for (String path : classpath) {
+            cp.append(File.pathSeparator).append(path);
+        }
+        command.add("-cp");
+        command.add(cp.toString());
+        
+        // System properties for SimpleOpenApiRunner
+        String modulePackage = getEffectiveModulePackage();
+        command.add("-DmodulePackage=" + modulePackage);
+        command.add("-DoutputFile=" + openApiOutputFile);
+        command.add("-DprojectName=" + project.getName());
+        
+        // Main class
+        command.add("org.openmrs.learning.runner.SimpleOpenApiRunner");
+        
+        getLog().info("Executing command: " + String.join(" ", command));
+        
+        // Execute the process
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.directory(project.getBasedir());
+        pb.redirectErrorStream(true);
+        
+        Process process = pb.start();
+        
+        // Read output
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                getLog().info("[OpenAPI] " + line);
+            }
+        }
+        
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new MojoExecutionException("OpenAPI generation failed with exit code: " + exitCode);
         }
     }
 }
