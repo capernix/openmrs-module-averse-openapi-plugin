@@ -1,6 +1,7 @@
 package org.openmrs.learning;
 
 import org.apache.maven.artifact.Artifact;
+import org.apache.maven.execution.MavenSession;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
@@ -12,15 +13,11 @@ import org.apache.maven.project.MavenProject;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
-import java.net.URL;
-import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
 
 /**
  * Module Detection and Package Discovery Mojo
@@ -38,6 +35,12 @@ public class ModuleDiscoveryMojo extends AbstractMojo {
      */
     @Parameter(defaultValue = "${project}", readonly = true, required = true)
     private MavenProject project;
+    
+    /**
+     * The Maven session - automatically injected
+     */
+    @Parameter(defaultValue = "${session}", readonly = true, required = true)
+    private MavenSession session;
     
     /**
      * Override module package detection if needed
@@ -324,44 +327,144 @@ public class ModuleDiscoveryMojo extends AbstractMojo {
      * Find the plugin JAR containing SimpleOpenApiRunner
      */
     private String findPluginJar() throws MojoExecutionException {
-        // Look for the plugin in Maven's plugin artifacts
+        // First try: Maven plugin context (most reliable)
+        String jarPath = findJarViaPluginContext();
+        if (jarPath != null) {
+            return jarPath;
+        }
+        
+        // Second try: Maven local repository (cross-platform fallback)
+        jarPath = findJarViaLocalRepository();
+        if (jarPath != null) {
+            return jarPath;
+        }
+        
+        // Third try: Maven project plugin dependencies
+        jarPath = findJarViaProjectPlugins();
+        if (jarPath != null) {
+            return jarPath;
+        }
+        
+        throw new MojoExecutionException("Could not locate plugin JAR containing SimpleOpenApiRunner. " +
+            "Tried: plugin context, local repository, and project plugins.");
+    }
+    
+    /**
+     * Try to find plugin JAR via Maven plugin context
+     */
+    private String findJarViaPluginContext() {
         @SuppressWarnings("unchecked")
         Map<String, Artifact> pluginArtifacts = (Map<String, Artifact>) getPluginContext().get("plugin.artifactMap");
         
-        getLog().info("DEBUG: Plugin context keys: " + getPluginContext().keySet());
+        getLog().debug("Plugin context keys: " + getPluginContext().keySet());
         
         if (pluginArtifacts != null) {
-            getLog().info("DEBUG: Found plugin.artifactMap with " + pluginArtifacts.size() + " artifacts");
-            for (Map.Entry<String, Artifact> entry : pluginArtifacts.entrySet()) {
-                getLog().info("DEBUG: Plugin artifact: " + entry.getKey() + " -> " + entry.getValue());
-                if (entry.getValue() != null && entry.getValue().getFile() != null) {
-                    getLog().info("DEBUG: Artifact file: " + entry.getValue().getFile().getAbsolutePath());
-                }
-            }
+            getLog().debug("Found plugin.artifactMap with " + pluginArtifacts.size() + " artifacts");
+            
+            // Look for this plugin's artifact
+            String currentGroupId = project.getPluginManagement() != null ? 
+                getCurrentPluginGroupId() : "org.openmrs.learning";
+            String currentArtifactId = getCurrentPluginArtifactId();
             
             for (Artifact artifact : pluginArtifacts.values()) {
-                if (artifact.getGroupId().equals("org.openmrs.learning") && 
-                    artifact.getArtifactId().equals("maven-plugin-parameter-test")) {
+                if (artifact.getGroupId().equals(currentGroupId) && 
+                    artifact.getArtifactId().equals(currentArtifactId)) {
                     String jarPath = artifact.getFile().getAbsolutePath();
                     getLog().info("Found plugin JAR via artifactMap: " + jarPath);
                     return jarPath;
                 }
             }
         } else {
-            getLog().warn("DEBUG: plugin.artifactMap is null");
+            getLog().debug("plugin.artifactMap is null");
         }
         
-        // Fallback: try to locate from Maven local repository
+        return null;
+    }
+    
+    /**
+     * Try to find plugin JAR in Maven local repository (cross-platform)
+     */
+    private String findJarViaLocalRepository() {
+        try {
+            // Get Maven local repository location (cross-platform)
+            String localRepoPath = getLocalRepositoryPath();
+            
+            // Build artifact path using proper file separators
+            String currentGroupId = getCurrentPluginGroupId();
+            String currentArtifactId = getCurrentPluginArtifactId();
+            String currentVersion = getCurrentPluginVersion();
+            
+            String artifactPath = currentGroupId.replace('.', File.separatorChar) +
+                File.separator + currentArtifactId +
+                File.separator + currentVersion +
+                File.separator + currentArtifactId + "-" + currentVersion + ".jar";
+            
+            File jarFile = new File(localRepoPath, artifactPath);
+            
+            if (jarFile.exists()) {
+                String jarPath = jarFile.getAbsolutePath();
+                getLog().info("Found plugin JAR via local repository: " + jarPath);
+                return jarPath;
+            }
+            
+            getLog().debug("Plugin JAR not found at: " + jarFile.getAbsolutePath());
+            
+        } catch (Exception e) {
+            getLog().warn("Failed to locate plugin JAR via local repository: " + e.getMessage());
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Try to find plugin JAR via project plugin dependencies
+     */
+    private String findJarViaProjectPlugins() {
+        // This would inspect the current project's plugin configuration
+        // and try to resolve the plugin artifact directly
+        getLog().debug("Attempting to find plugin JAR via project plugins (not implemented yet)");
+        return null;
+    }
+    
+    /**
+     * Get Maven local repository path (cross-platform)
+     */
+    private String getLocalRepositoryPath() {
+        // Try to get from Maven session first
+        if (session != null && session.getLocalRepository() != null) {
+            return session.getLocalRepository().getBasedir();
+        }
+        
+        // Fallback: build standard Maven local repository path
         String userHome = System.getProperty("user.home");
-        String jarPath = userHome + "/.m2/repository/org/openmrs/learning/maven-plugin-parameter-test/1.0.0-SNAPSHOT/maven-plugin-parameter-test-1.0.0-SNAPSHOT.jar";
-        File jarFile = new File(jarPath);
-        
-        if (jarFile.exists()) {
-            getLog().info("Found plugin JAR via fallback: " + jarPath);
-            return jarPath;
-        }
-        
-        throw new MojoExecutionException("Could not locate plugin JAR containing SimpleOpenApiRunner");
+        return new File(userHome, ".m2" + File.separator + "repository").getAbsolutePath();
+    }
+    
+    /**
+     * Get current plugin's groupId
+     */
+    private String getCurrentPluginGroupId() {
+        // For now, return the known groupId
+        // In a real implementation, this could be derived from plugin descriptor
+        return "org.openmrs.learning";
+    }
+    
+    /**
+     * Get current plugin's artifactId  
+     */
+    private String getCurrentPluginArtifactId() {
+        // For now, return the known artifactId
+        // In a real implementation, this could be derived from plugin descriptor
+        return "maven-plugin-parameter-test";
+    }
+    
+    /**
+     * Get current plugin's version
+     */
+    private String getCurrentPluginVersion() {
+        // For now, return the known version
+        // In a real implementation, this could be derived from plugin descriptor
+        return "1.0.0-SNAPSHOT";
     }
     
     /**
